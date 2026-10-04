@@ -1,10 +1,21 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, EmailStr
-from datetime import datetime
-from pathlib import Path
-import json
 
+from fastapi import FastAPI, HTTPException, Depends
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
+from datetime import datetime
+
+from database import engine, get_db
+from models import Base, Orcamento
+from schemas import OrcamentoCreate, OrcamentoResponse
+
+
+# Cria as tabelas do banco de dados
+Base.metadata.create_all(bind=engine)
+
+
+# ==========================================
+# CONFIGURAÇÃO DA API
+# ==========================================
 
 app = FastAPI(
     title="BS Construtora API",
@@ -13,7 +24,10 @@ app = FastAPI(
 )
 
 
+# ==========================================
 # CORS
+# ==========================================
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -21,43 +35,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"]
 )
-
-
-# Banco de dados em arquivo JSON
-DATA = Path(__file__).parent / "data"
-DATA.mkdir(exist_ok=True)
-
-DB = DATA / "orcamentos.json"
-
-if not DB.exists():
-    DB.write_text("[]", encoding="utf-8")
-
-
-# Modelo de dados
-class Orcamento(BaseModel):
-    nome: str
-    telefone: str
-    email: EmailStr | None = None
-    tipo: str
-    cidade: str | None = None
-    descricao: str | None = None
-
-
-# Função para carregar os orçamentos
-def carregar_orcamentos():
-    return json.loads(DB.read_text(encoding="utf-8"))
-
-
-# Função para salvar os orçamentos
-def salvar_orcamentos(items):
-    DB.write_text(
-        json.dumps(
-            items,
-            ensure_ascii=False,
-            indent=2
-        ),
-        encoding="utf-8"
-    )
 
 
 # ==========================================
@@ -74,7 +51,7 @@ def health():
 
 
 # ==========================================
-# Serviços
+# SERVIÇOS
 # ==========================================
 
 @app.get("/api/servicos")
@@ -91,128 +68,157 @@ def servicos():
 
 
 # ==========================================
-# Criar orçamento
+# CRIAR ORÇAMENTO
 # ==========================================
 
 @app.post("/api/orcamentos", status_code=201)
-def criar_orcamento(payload: Orcamento):
+def criar_orcamento(
+    payload: OrcamentoCreate,
+    db: Session = Depends(get_db)
+):
+    novo_orcamento = Orcamento(
+        nome=payload.nome,
+        telefone=payload.telefone,
+        email=payload.email,
+        tipo=payload.tipo,
+        cidade=payload.cidade,
+        descricao=payload.descricao
+    )
 
-    items = carregar_orcamentos()
-
-    novo_id = max(
-        [item["id"] for item in items],
-        default=0
-    ) + 1
-
-    item = payload.model_dump()
-
-    item["id"] = novo_id
-    item["created_at"] = datetime.now().isoformat()
-
-    items.append(item)
-
-    salvar_orcamentos(items)
+    db.add(novo_orcamento)
+    db.commit()
+    db.refresh(novo_orcamento)
 
     return {
         "message": "Solicitação recebida com sucesso",
-        "id": item["id"]
+        "id": novo_orcamento.id
     }
 
 
 # ==========================================
-# Listar orçamentos
+# LISTAR ORÇAMENTOS
 # ==========================================
 
 @app.get("/api/orcamentos")
-def listar_orcamentos():
-
-    items = carregar_orcamentos()
+def listar_orcamentos(
+    db: Session = Depends(get_db)
+):
+    items = (
+        db.query(Orcamento)
+        .order_by(Orcamento.id)
+        .all()
+    )
 
     return {
         "total": len(items),
-        "items": items
+        "items": [
+            {
+                "id": item.id,
+                "nome": item.nome,
+                "telefone": item.telefone,
+                "email": item.email,
+                "tipo": item.tipo,
+                "cidade": item.cidade,
+                "descricao": item.descricao,
+                "created_at": item.created_at,
+                "updated_at": item.updated_at
+            }
+            for item in items
+        ]
     }
 
 
 # ==========================================
-# Buscar orçamentos pelo id
+# BUSCAR ORÇAMENTO PELO ID
 # ==========================================
 
-@app.get("/api/orcamentos/{orcamento_id}")
-def buscar_orcamento(orcamento_id: int):
-
-    items = carregar_orcamentos()
-
-    for item in items:
-        if item["id"] == orcamento_id:
-            return item
-
-    raise HTTPException(
-        status_code=404,
-        detail="Orçamento não encontrado"
+@app.get(
+    "/api/orcamentos/{orcamento_id}",
+    response_model=OrcamentoResponse
+)
+def buscar_orcamento(
+    orcamento_id: int,
+    db: Session = Depends(get_db)
+):
+    item = (
+        db.query(Orcamento)
+        .filter(Orcamento.id == orcamento_id)
+        .first()
     )
 
+    if not item:
+        raise HTTPException(
+            status_code=404,
+            detail="Orçamento não encontrado"
+        )
+
+    return item
+
 
 # ==========================================
-# Atualizar orçamento
+# ATUALIZAR ORÇAMENTO
 # ==========================================
 
-@app.put("/api/orcamentos/{orcamento_id}")
+@app.put(
+    "/api/orcamentos/{orcamento_id}",
+    response_model=OrcamentoResponse
+)
 def atualizar_orcamento(
     orcamento_id: int,
-    payload: Orcamento
+    payload: OrcamentoCreate,
+    db: Session = Depends(get_db)
 ):
-
-    items = carregar_orcamentos()
-
-    for index, item in enumerate(items):
-
-        if item["id"] == orcamento_id:
-
-            atualizado = payload.model_dump()
-
-            atualizado["id"] = orcamento_id
-            atualizado["created_at"] = item["created_at"]
-            atualizado["updated_at"] = datetime.now().isoformat()
-
-            items[index] = atualizado
-
-            salvar_orcamentos(items)
-
-            return {
-                "message": "Orçamento atualizado com sucesso",
-                "item": atualizado
-            }
-
-    raise HTTPException(
-        status_code=404,
-        detail="Orçamento não encontrado"
+    item = (
+        db.query(Orcamento)
+        .filter(Orcamento.id == orcamento_id)
+        .first()
     )
+
+    if not item:
+        raise HTTPException(
+            status_code=404,
+            detail="Orçamento não encontrado"
+        )
+
+    item.nome = payload.nome
+    item.telefone = payload.telefone
+    item.email = payload.email
+    item.tipo = payload.tipo
+    item.cidade = payload.cidade
+    item.descricao = payload.descricao
+    item.updated_at = datetime.now()
+
+    db.commit()
+    db.refresh(item)
+
+    return item
 
 
 # ==========================================
-# Para excluir orçamento
+# EXCLUIR ORÇAMENTO
 # ==========================================
 
 @app.delete("/api/orcamentos/{orcamento_id}")
-def excluir_orcamento(orcamento_id: int):
-
-    items = carregar_orcamentos()
-
-    for index, item in enumerate(items):
-
-        if item["id"] == orcamento_id:
-
-            removido = items.pop(index)
-
-            salvar_orcamentos(items)
-
-            return {
-                "message": "Orçamento excluído com sucesso",
-                "id": removido["id"]
-            }
-
-    raise HTTPException(
-        status_code=404,
-        detail="Orçamento não encontrado"
+def excluir_orcamento(
+    orcamento_id: int,
+    db: Session = Depends(get_db)
+):
+    item = (
+        db.query(Orcamento)
+        .filter(Orcamento.id == orcamento_id)
+        .first()
     )
+
+    if not item:
+        raise HTTPException(
+            status_code=404,
+            detail="Orçamento não encontrado"
+        )
+
+    db.delete(item)
+    db.commit()
+
+    return {
+        "message": "Orçamento excluído com sucesso",
+        "id": orcamento_id
+    }
