@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -13,11 +13,16 @@ from schemas import (
     OrcamentoCreateResponse,
 )
 
+
 router = APIRouter(
     prefix="/api/orcamentos",
     tags=["Orçamentos"]
 )
 
+
+# ==========================================
+# CRIAR ORÇAMENTO
+# ==========================================
 
 @router.post(
     "",
@@ -56,22 +61,77 @@ def criar_orcamento(
         )
 
 
+# ==========================================
+# LISTAR ORÇAMENTOS
+# ==========================================
+
 @router.get(
     "",
     response_model=OrcamentoListResponse
 )
 def listar_orcamentos(
+    page: int = Query(
+        1,
+        ge=1,
+        description="Número da página"
+    ),
+    limit: int = Query(
+        10,
+        ge=1,
+        le=100,
+        description="Quantidade de registros por página"
+    ),
+    busca: str | None = Query(
+        None,
+        description="Busca pelo nome do cliente"
+    ),
+    tipo: str | None = Query(
+        None,
+        description="Filtro pelo tipo de projeto"
+    ),
+    cidade: str | None = Query(
+        None,
+        description="Filtro pela cidade da obra"
+    ),
     db: Session = Depends(get_db)
 ):
     try:
+        query = db.query(Orcamento)
+
+        # Busca pelo nome
+        if busca:
+            query = query.filter(
+                Orcamento.nome.ilike(f"%{busca}%")
+            )
+
+        # Filtro por tipo
+        if tipo:
+            query = query.filter(
+                Orcamento.tipo == tipo
+            )
+
+        # Filtro por cidade
+        if cidade:
+            query = query.filter(
+                Orcamento.cidade == cidade
+            )
+
+        # Total de registros após os filtros
+        total = query.count()
+
+        # Paginação
+        offset = (page - 1) * limit
+
         itens = (
-            db.query(Orcamento)
+            query
             .order_by(Orcamento.id.desc())
+            .offset(offset)
+            .limit(limit)
             .all()
         )
 
         return {
-            "total": len(itens),
+            "total": total,
             "items": itens
         }
 
@@ -81,6 +141,10 @@ def listar_orcamentos(
             detail="Não foi possível consultar os orçamentos."
         )
 
+
+# ==========================================
+# BUSCAR ORÇAMENTO POR ID
+# ==========================================
 
 @router.get(
     "/{orcamento_id}",
@@ -114,6 +178,10 @@ def buscar_orcamento(
             detail="Não foi possível consultar o orçamento."
         )
 
+
+# ==========================================
+# ATUALIZAR ORÇAMENTO
+# ==========================================
 
 @router.put(
     "/{orcamento_id}",
@@ -161,6 +229,10 @@ def atualizar_orcamento(
             detail="Não foi possível atualizar o orçamento."
         )
 
+
+# ==========================================
+# EXCLUIR ORÇAMENTO
+# ==========================================
 
 @router.delete(
     "/{orcamento_id}"
