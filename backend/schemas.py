@@ -1,5 +1,7 @@
-from pydantic import BaseModel, EmailStr
+
 from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict, EmailStr
 
 
 class OrcamentoCreate(BaseModel):
@@ -16,5 +18,15 @@ class OrcamentoResponse(OrcamentoCreate):
     created_at: datetime
     updated_at: datetime | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
+
+class OrcamentoListResponse(BaseModel):
+    total: int
+    items: list[OrcamentoResponse]
+
+
+class OrcamentoCreateResponse(BaseModel):
+    message: str
+    id: int
+
