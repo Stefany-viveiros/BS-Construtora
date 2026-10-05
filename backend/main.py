@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from database import engine
 from models import Base
+from routes.auth import router as auth_router
 from routes.orcamentos import router as orcamentos_router
 
 
@@ -77,6 +78,13 @@ def servicos():
             "Transformação de espaços"
         ]
     }
+
+
+# ==========================================
+# ROTAS DE AUTENTICAÇÃO
+# ==========================================
+
+app.include_router(auth_router)
 
 
 # ==========================================
