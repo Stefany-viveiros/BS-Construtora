@@ -1,7 +1,7 @@
-
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -13,48 +13,48 @@ from schemas import (
     OrcamentoCreateResponse,
 )
 
-
 router = APIRouter(
     prefix="/api/orcamentos",
     tags=["Orçamentos"]
 )
 
 
-# ==========================================
-# CRIAR ORÇAMENTO
-# ==========================================
-
 @router.post(
     "",
     response_model=OrcamentoCreateResponse,
-    status_code=201
+    status_code=status.HTTP_201_CREATED
 )
 def criar_orcamento(
-    payload: OrcamentoCreate,
+    dados: OrcamentoCreate,
     db: Session = Depends(get_db)
 ):
     novo_orcamento = Orcamento(
-        nome=payload.nome,
-        telefone=payload.telefone,
-        email=payload.email,
-        tipo=payload.tipo,
-        cidade=payload.cidade,
-        descricao=payload.descricao
+        nome=dados.nome,
+        telefone=dados.telefone,
+        email=dados.email,
+        tipo=dados.tipo,
+        cidade=dados.cidade,
+        descricao=dados.descricao
     )
 
-    db.add(novo_orcamento)
-    db.commit()
-    db.refresh(novo_orcamento)
+    try:
+        db.add(novo_orcamento)
+        db.commit()
+        db.refresh(novo_orcamento)
 
-    return {
-        "message": "Solicitação recebida com sucesso",
-        "id": novo_orcamento.id
-    }
+        return {
+            "message": "Orçamento enviado com sucesso.",
+            "id": novo_orcamento.id
+        }
 
+    except SQLAlchemyError:
+        db.rollback()
 
-# ==========================================
-# LISTAR ORÇAMENTOS
-# ==========================================
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Não foi possível salvar o orçamento."
+        )
+
 
 @router.get(
     "",
@@ -63,21 +63,24 @@ def criar_orcamento(
 def listar_orcamentos(
     db: Session = Depends(get_db)
 ):
-    items = (
-        db.query(Orcamento)
-        .order_by(Orcamento.id)
-        .all()
-    )
+    try:
+        itens = (
+            db.query(Orcamento)
+            .order_by(Orcamento.id.desc())
+            .all()
+        )
 
-    return {
-        "total": len(items),
-        "items": items
-    }
+        return {
+            "total": len(itens),
+            "items": itens
+        }
 
+    except SQLAlchemyError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Não foi possível consultar os orçamentos."
+        )
 
-# ==========================================
-# BUSCAR ORÇAMENTO PELO ID
-# ==========================================
 
 @router.get(
     "/{orcamento_id}",
@@ -87,24 +90,30 @@ def buscar_orcamento(
     orcamento_id: int,
     db: Session = Depends(get_db)
 ):
-    item = (
-        db.query(Orcamento)
-        .filter(Orcamento.id == orcamento_id)
-        .first()
-    )
-
-    if not item:
-        raise HTTPException(
-            status_code=404,
-            detail="Orçamento não encontrado"
+    try:
+        orcamento = (
+            db.query(Orcamento)
+            .filter(Orcamento.id == orcamento_id)
+            .first()
         )
 
-    return item
+        if not orcamento:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Orçamento não encontrado."
+            )
 
+        return orcamento
 
-# ==========================================
-# ATUALIZAR ORÇAMENTO
-# ==========================================
+    except HTTPException:
+        raise
+
+    except SQLAlchemyError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Não foi possível consultar o orçamento."
+        )
+
 
 @router.put(
     "/{orcamento_id}",
@@ -112,61 +121,81 @@ def buscar_orcamento(
 )
 def atualizar_orcamento(
     orcamento_id: int,
-    payload: OrcamentoCreate,
+    dados: OrcamentoCreate,
     db: Session = Depends(get_db)
 ):
-    item = (
-        db.query(Orcamento)
-        .filter(Orcamento.id == orcamento_id)
-        .first()
-    )
-
-    if not item:
-        raise HTTPException(
-            status_code=404,
-            detail="Orçamento não encontrado"
+    try:
+        orcamento = (
+            db.query(Orcamento)
+            .filter(Orcamento.id == orcamento_id)
+            .first()
         )
 
-    item.nome = payload.nome
-    item.telefone = payload.telefone
-    item.email = payload.email
-    item.tipo = payload.tipo
-    item.cidade = payload.cidade
-    item.descricao = payload.descricao
-    item.updated_at = datetime.now()
+        if not orcamento:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Orçamento não encontrado."
+            )
 
-    db.commit()
-    db.refresh(item)
+        orcamento.nome = dados.nome
+        orcamento.telefone = dados.telefone
+        orcamento.email = dados.email
+        orcamento.tipo = dados.tipo
+        orcamento.cidade = dados.cidade
+        orcamento.descricao = dados.descricao
+        orcamento.updated_at = datetime.utcnow()
 
-    return item
+        db.commit()
+        db.refresh(orcamento)
+
+        return orcamento
+
+    except HTTPException:
+        raise
+
+    except SQLAlchemyError:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Não foi possível atualizar o orçamento."
+        )
 
 
-# ==========================================
-# EXCLUIR ORÇAMENTO
-# ==========================================
-
-@router.delete("/{orcamento_id}")
+@router.delete(
+    "/{orcamento_id}"
+)
 def excluir_orcamento(
     orcamento_id: int,
     db: Session = Depends(get_db)
 ):
-    item = (
-        db.query(Orcamento)
-        .filter(Orcamento.id == orcamento_id)
-        .first()
-    )
-
-    if not item:
-        raise HTTPException(
-            status_code=404,
-            detail="Orçamento não encontrado"
+    try:
+        orcamento = (
+            db.query(Orcamento)
+            .filter(Orcamento.id == orcamento_id)
+            .first()
         )
 
-    db.delete(item)
-    db.commit()
+        if not orcamento:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Orçamento não encontrado."
+            )
 
-    return {
-        "message": "Orçamento excluído com sucesso",
-        "id": orcamento_id
-    }
+        db.delete(orcamento)
+        db.commit()
 
+        return {
+            "message": "Orçamento excluído com sucesso."
+        }
+
+    except HTTPException:
+        raise
+
+    except SQLAlchemyError:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Não foi possível excluir o orçamento."
+        )
