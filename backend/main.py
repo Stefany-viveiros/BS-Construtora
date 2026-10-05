@@ -1,6 +1,7 @@
-
+import os
 from datetime import datetime
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -9,7 +10,13 @@ from models import Base
 from routes.orcamentos import router as orcamentos_router
 
 
-# Cria as tabelas do banco de dados
+load_dotenv()
+
+
+# ==========================================
+# CRIA AS TABELAS DO BANCO DE DADOS
+# ==========================================
+
 Base.metadata.create_all(bind=engine)
 
 
@@ -30,7 +37,12 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        os.getenv(
+            "FRONTEND_URL",
+            "http://localhost:5173"
+        )
+    ],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"]
@@ -72,4 +84,3 @@ def servicos():
 # ==========================================
 
 app.include_router(orcamentos_router)
-
